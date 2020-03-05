@@ -2,9 +2,10 @@
 import os, sys, time
 import telebot
 import datetime
-import logging
-import operator
+#import logging
+#import operator
 import numpy
+import sqlite3
 
 '''Grab your bot token from a textfile (.token). This is required to run.'''
 try:
@@ -31,10 +32,13 @@ commands=[] is the list of supported commands to which the bot with reply.
 current behaviour of this bot is to ignore any commands or messages that 
 are not in the approved command list.
 '''
-@bot.message_handler(commands=['slots', 'vlts', 'vlt'])
+@bot.message_handler(commands=['slots', 'vlts', 'vlt', 'bank'])
 def send_message(message):
     print(message)
-    reply = slot_handler(message)
+    if message.text[:5] == '/bank':
+        reply = bank_handler(message)
+    else:
+        reply = slot_handler(message)
     print(reply)
     bot.reply_to(message, reply)
 
@@ -44,16 +48,19 @@ def slot_handler(message):
     if not today == credit_tracker.current_date:
         credit_tracker.reset()
     user_id = message.from_user.id #the Telegram UID
-
+    user_name = str(message.from_user.first_name + ' ' + message.from_user.last_name)
+    print(type(user_name))
+    print(user_name)
+    credit_tracker.populate_user_map(user_id, user_name)
     # check for the user in the credit_tracker, if found, set
     # remaining credit, else add them and give them some smokes.
     try:
-        remaining_credits = credit_tracker.user_credit_map[user_id]
+        remaining_credits = credit_tracker.get_user(user_id)[1]
         if remaining_credits < 1:
-            return "Sorry there, Rick, but you got no more cans of ravioli\n Way she goes."
+            return 'Sorry there, Rick, but I gotta cut ya off.\n Way she goes.'
     except:
-        print("user {0} not found in map, adding with 5 credits.".format(user_id))
-        credit_tracker.add_user(user_id, 5)
+        print('user {0} not found in map, adding with 5 credits.'.format(user_id))
+        credit_tracker.add_or_upd_user(user_id, 5)
         remaining_credits = 5
     
     # determine bet size based on int passed after /command.
@@ -91,25 +98,24 @@ def slot_handler(message):
     total_score = bet * win_lines #extra-line multiplier
     if total_score == 0:
         total_score = -bet # ding this user for their total bet amount
-    credit_tracker.credit_change(user_id, total_score)
-    fullname = str(message.from_user.first_name + ' ' + message.from_user.last_name)
-    return_text = """{0} pulled the one arm bandit and got:\n
-                     {1}    {2}      {3}\n
-                     {4}    {5}      {6}\n
-                     {7}    {8}      {9}\n
-                    """.format(fullname,
-                                *[slot_items[i] for i in numpy.nditer(slot_array)])
+    credit_tracker.add_or_upd_user(user_id, total_score)
+    remaining_credits_now = credit_tracker.get_user(user_id)[1]
+    return_text = ("{0} pulled the one arm bandit and got:\n"
+                    " {1}    {2}      {3}\n\n"
+                     "{4}    {5}      {6}\n\n"
+                     "{7}    {8}      {9}\n").format(user_name, *[slot_items[i] for i in numpy.nditer(slot_array)])
     if win_lines > 0:
-        return_text += '''You won on {0} line(s).\n
-                     That's {1} more cans of ravioli for you, there, Rick.\n
-                     You now have a total of {2} credits!
-                     '''.format(win_lines,
-                                total_score,
-                                credit_tracker.user_credit_map[user_id])
+        return_text += ("You won on {0} line(s).\n"
+                     "That's {1} more cans of ravioli for you, there, Rick.\n"
+                     "You now have a total of {2} credits!").format(win_lines,
+                                                                    total_score,
+                                                                    remaining_credits_now)
     else:
-        return_text += '''Way to go Cory and Trevor, you lost {0} credits,\n
-                        Now you only have {1} left.\n 
-                        Smokes, let's go!'''.format(total_score,credit_tracker.user_credit_map[user_id])
+        return_text += "Good job CYRUS, ya dick. you lost {0} credits.\n".format(total_score)
+        if remaining_credits_now < 1:
+            return_text += "You're out of credits now, why don't you go study for your Grade 10."
+        else:
+            return_text += "Now you have {0} left. Smokes, let's go!".format(remaining_credits_now)
     return return_text
 
 def deconstruct_array(a):
@@ -135,22 +141,77 @@ def deconstruct_array(a):
         line_list.append(i)
     return line_list
 
-class userCreditTracker(object):
-    def __init__(self):
-        self.reset()
-
-    def add_user(self, user_id, credits=0):
-        self.user_credit_map[user_id] = credits
-
-    def credit_change(self, user_id, credit_delta):
-        self.user_credit_map[user_id] += credit_delta
+def bank_handler(message):
+    sql = ("SELECT u.user_name, c.bank "
+        "FROM users u, credit_tracker c "
+        "WHERE u.user_id == c.user_id ")
+    cur_result = credit_tracker.db_conn.execute(sql)
+    return_text = ''
+    for i in cur_result.fetchall():
+        return_text += "{0}: {1}".format(*i)
+    return return_text
     
+class userCreditTracker(object):
+    def __init__(self, db_file):
+        self.db_file = db_file
+        self.db_conn = sqlite3.connect(self.db_file, check_same_thread=False)
+        try:
+            self._init_db()
+        except Exception as e:
+            sys.exit(e)
+        self.current_date = datetime.date.today().strftime('%Y%m%d')
+
+    def _init_db(self):
+        schema = self.db_conn.execute("SELECT name "
+                                    "FROM sqlite_master "
+                                    "Where type = 'table'")
+        if not schema.fetchall():
+            self.db_conn.execute("CREATE TABLE credit_tracker "
+                                "(user_id INT UNIQUE, "
+                                "credits INT, bank INT)")
+            self.db_conn.execute("CREATE TABLE users "
+                                "(user_id INT UNIQUE, user_name TEXT)")
+            self.db_conn.commit()
+    
+    def populate_user_map(self, user_id, user_name):
+        sql = ("INSERT or REPLACE "
+              "INTO users "
+              "VALUES({0}, '{1}')".format(user_id, user_name))
+        print(sql)
+        self.db_conn.execute(sql)
+    
+    def check_user_map(self, user_id):
+        sql = "SELECT user_name FROM users WHERE user_id = {0}".format(user_id)
+        cur_result = self.db_conn.execute(sql)
+        return cur_result.fetchone()
+
+    def add_or_upd_user(self, user_id, credits=0, bank=0):
+        try:
+            bank += self.get_user(user_id)[2]
+            credits += self.get_user(user_id)[1]
+        except:
+            pass
+        sql = ("INSERT or REPLACE "
+                "INTO credit_tracker "
+                "VALUES({0}, {1}, {2})".format(user_id, credits, bank))
+        self.db_conn.execute(sql)
+        self.db_conn.commit()
+    
+    def get_user(self, user_id):
+        cursor_result = self.db_conn.execute("SELECT * "
+                                            "FROM credit_tracker "
+                                            "WHERE user_id = {0}".format(user_id))
+        return cursor_result.fetchone()
+
     def reset(self):
         self.current_date = datetime.date.today().strftime('%Y%m%d')
-        self.user_credit_map = {}
+        sql = "UPDATE credit_tracker SET credits = 5"
+        self.db_conn.execute(sql)
+        self.db_conn.commit()
 
 if __name__ == '__main__':
     #init the global tracker
-    credit_tracker = userCreditTracker()
+    db_file = 'credit_tracker.sqlite3db'    
+    credit_tracker = userCreditTracker(db_file)
     #start the bot in polling mode
     bot.polling()
