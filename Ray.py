@@ -7,6 +7,15 @@ import datetime
 import numpy
 import sqlite3
 
+"""
+TO-DO:
+1) refactor duplicate actions (like moving credits into bank, which we do twice)
+2) create a better "message" object to pass around that has all the variables
+    we want/need already parsed instead of doing it in every func.
+
+"""
+
+
 '''Grab your bot token from a textfile (.token). This is required to run.'''
 try:
     with open('.token', 'r') as token_file:
@@ -156,15 +165,53 @@ def deconstruct_array(a):
     return line_list
 
 def bank_handler(message):
+    actions = ['wd', 'dep']
+    try:
+        bank_action = message.text.split(' ')[1]
+    except:
+        bank_action = 'None'
+    if bank_action not in actions:
+        return_text = bank_statement()
+    elif bank_action == 'wd':
+        return_text = bank_withdrawl(message)
+    elif bank_action == 'dep':
+        return_text = bank_deposit(message)
+    return return_text
+
+def bank_withdrawl(message):
+    """
+    user_id = message.from_user.id
+    try:
+        wd_amount = message.text.split(' ')[2]
+    except:
+        pass
+    """
+    return 'Withdrawl feature coming soon!'
+
+def bank_deposit(message):
+    user_id = message.from_user.id
+    user_name = str(message.from_user.first_name +
+                    ' ' +
+                    message.from_user.last_name)
+    try:
+        credit_info = credit_tracker.get_user_credit(user_id)
+        new_bank = int(credit_info[1] + credit_info[2])
+        credit_tracker.add_or_upd_user_credit(user_id, 0, new_bank)
+    except:
+        pass
+    return_text = "Moved {0}'s {1} credits into the bank".format(user_name, credit_info[1])
+    return return_text
+
+def bank_statement():
     sql = ("SELECT u.user_name, c.bank "
         "FROM users u, credit_tracker c "
         "WHERE u.user_id == c.user_id ")
     cur_result = credit_tracker.db_conn.execute(sql)
-    return_text = ''    
+    return_text = ''
     for i in cur_result.fetchall():
         return_text += "{0}: {1}\n".format(*i)
     return return_text
-    
+
 class userCreditTracker(object):
     def __init__(self, db_file):
         self.db_file = db_file
@@ -214,7 +261,7 @@ class userCreditTracker(object):
 
 if __name__ == '__main__':
     #init the global tracker
-    db_file = 'credit_tracker.sqlite3db'    
+    db_file = 'credit_tracker.sqlite3db'
     credit_tracker = userCreditTracker(db_file)
     #start the bot in polling mode
     bot.polling(none_stop=True, timeout=90)
