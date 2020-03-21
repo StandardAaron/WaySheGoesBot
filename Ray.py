@@ -12,7 +12,8 @@ TO-DO:
 1) refactor duplicate actions (like moving credits into bank, which we do twice)
 2) create a better "message" object to pass around that has all the variables
     we want/need already parsed instead of doing it in every func.
-
+3) fix race condition if someone transfers before issuing their first pull
+    of the day, they lose the transferred creds, and get 5 in their place.
 """
 
 
@@ -123,14 +124,12 @@ def slot_handler(message):
     else:
         remaining_credits_now = current_user_credits + total_score # credit
     credit_tracker.add_or_upd_user_credit(user_id, remaining_credits_now, current_user_bank)
-    return_text = ("{0} pulled the one arm bandit and got:\n"
-                    " {1}    {2}      {3}\n\n"
-                     "{4}    {5}      {6}\n\n"
-                     "{7}    {8}      {9}\n").format(user_name, *[slot_items[i] for i in numpy.nditer(slot_array)])
+    return_text = (" {}    {}      {}\n\n"
+                     "{}    {}      {}\n\n"
+                     "{}    {}      {}\n").format(*[slot_items[i] for i in numpy.nditer(slot_array)])
     if win_lines > 0:
-        return_text += ("You won on {0} line(s).\n"
-                     "That's {1} more cans of ravioli for you, there, Rick.\n"
-                     "You now have a total of {2} credits!").format(win_lines,
+        return_text += ("Your bet of {0} won on {1} line(s) for a total of {2}."
+                     "You now have a total of {3} credits!").format(bet, win_lines,
                                                                     total_score,
                                                                     remaining_credits_now)
     else:
@@ -173,20 +172,30 @@ def bank_handler(message):
     if bank_action not in actions:
         return_text = bank_statement()
     elif bank_action == 'wd':
-        return_text = bank_withdrawl(message)
+        return_text = bank_withdraw(message)
     elif bank_action == 'dep':
         return_text = bank_deposit(message)
     return return_text
 
-def bank_withdrawl(message):
-    """
+def bank_withdraw(message):
     user_id = message.from_user.id
     try:
-        wd_amount = message.text.split(' ')[2]
+        user_current_stats = credit_tracker.get_user_credit(user_id)
+        user_current_bank = user_current_stats[2]
+        user_current_credit = user_current_stats[1]
     except:
-        pass
-    """
-    return 'Withdrawl feature coming soon!'
+        return 'Cant load your bank right now.'
+    try:
+        wd_amount = int(message.text.split(' ')[2])
+    except:
+        return 'Unknown amount for withdrawal.'
+    if user_current_bank >= wd_amount:
+        user_current_bank -= wd_amount
+        user_current_credit += wd_amount
+        credit_tracker.add_or_upd_user_credit(user_id,
+                                            user_current_credit,
+                                            user_current_bank)
+    return 'Transfer of {} credits complete.'.format(wd_amount)
 
 def bank_deposit(message):
     user_id = message.from_user.id
@@ -246,7 +255,7 @@ class userCreditTracker(object):
         cur_result = self.db_conn.execute(sql)
         return cur_result.fetchone()
 
-    def  add_or_upd_user_credit(self, user_id, credits=0, bank=0):
+    def add_or_upd_user_credit(self, user_id, credits=0, bank=0):
         sql = ("INSERT or REPLACE "
                 "INTO credit_tracker "
                 "VALUES({0}, {1}, {2})".format(user_id, credits, bank))
