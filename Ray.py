@@ -2,8 +2,6 @@
 import os, sys, time
 import telebot
 import datetime
-#import logging
-#import operator
 import numpy
 import sqlite3
 
@@ -57,7 +55,6 @@ def send_message(message):
 
 def help_handler(message):
     split_message = message.text.split(" ")
-
     if message.from_user.id == 942327020 and len(split_message) > 2 and split_message[1] == 'lend':
         try:
             return_text = "OK, Ill lend {0} 1000 credits, Bubbs, but only 'cause you're askin'.".format(split_message[2])
