@@ -1,12 +1,12 @@
 #!/usr/bin/python
-import os, sys, time
-import telebot
 import datetime
-import numpy
+import os
 import sqlite3
+import sys
+import time
 
-
-
+import numpy
+import telebot
 
 """
 TO-DO:
