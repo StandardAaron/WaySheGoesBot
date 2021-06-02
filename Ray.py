@@ -17,7 +17,6 @@ TO-DO:
     of the day, they lose the transferred creds, and get 5 in their place.
 """
 
-
 '''Grab your bot token from a textfile (.token). This is required to run.'''
 try:
     with open('.token', 'r') as token_file:
@@ -58,14 +57,16 @@ def send_message(message):
 
 def help_handler(message):
     split_message = message.text.split(" ")
-    if message.from_user.id == 942327020 and len(split_message) > 2 and split_message[1] == 'lend':
+    # For now, we'll let people borrow indiscriminately, but we should implement a limit,
+    # an auto-payback system, etc.
+    if len(split_message) > 2 and split_message[1] == 'lend':
         try:
-            return_text = "OK, Ill lend {0} 1000 credits, Bubbs, but only 'cause you're askin'.".format(split_message[2])
             user_id_to_upd = credit_tracker.resolve_user_id(split_message[2])
+            return_text = "OK, Ill lend {0} 1000 credits, Bubbs, but only 'cause you're askin'.".format(user_id_to_upd)            
             print(user_id_to_upd)
             credit_tracker.add_or_upd_user_credit(user_id_to_upd, credits=1000)
         except:
-            return_text = "That's not gonna happen, you haven't been payin' into EI ... UI ... whatever the fuck you call it"
+            return_text = "That's not gonna happen, you haven't been payin' into EI ... UI ... whatever you call it."
     else:
         return_text = ('/ray: This message.\n'
                 '/bank: return bank totals.\n'
