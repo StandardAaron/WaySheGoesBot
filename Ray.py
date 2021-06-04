@@ -28,26 +28,35 @@ except Exception as e:
 bot = telebot.TeleBot(TOKEN)
 
 master_items = [u'\U0001F352',
-                u'\U0001F4A9',
-                u'\U0001F36B',
-                u'\U0001F4B0',
-                u'\U0001F6AC',
-                u'\U0001F37A',
-                u'\U0001F99E',
-                u'\U0001F41D',
-                u'\U00000037\U0000FE0F\U000020E3']
+    u'\U0001F4A9',
+    u'\U0001F36B',
+    u'\U0001F4B0',
+    u'\U0001F6AC',
+    u'\U0001F37A',
+    u'\U0001F99E',
+    u'\U0001F41D',
+    u'\U00000037\U0000FE0F\U000020E3']
 
 '''
 commands=[] is the list of supported commands to which the bot with reply.
 current behaviour of this bot is to ignore any commands or messages that 
 are not in the approved command list.
 '''
-@bot.message_handler(commands=['slots', 'vlts', 'vlt', 'bank', 'ray'])
+
+@bot.message_handler(commands=['slots', 
+    'vlts', 
+    'vlt', 
+    'bank', 
+    'ray', 
+    'loan', 
+    'lend', 
+    'borrow'])
+
 def send_message(message):
     split_message = message.text.split(' ')
     print(message)
     if message.text[:5] == '/bank':
-        reply = bank_handler(message)
+        reply = bank_statement()
     elif message.text[:2] == '/r' and split_message[0][-2:] == 'ay':
         reply = help_handler(message)
     else:
@@ -61,20 +70,22 @@ def help_handler(message):
     # an auto-payback system, etc.
     if len(split_message) > 2 and split_message[1] == 'lend':
         try:
-            user_id_to_upd = credit_tracker.resolve_user_id(split_message[2])
-            return_text = "OK, Ill lend {0} 1000 credits, Bubbs, but only 'cause you're askin'.".format(user_id_to_upd)            
+            user_id_to_upd = bank_tracker.resolve_user_id(split_message[2])
+            return_text = (
+                "OK, Ill lend {0} 1000 credits, "
+                "Bubbs, but only 'cause you're askin'.".format(user_id_to_upd))            
             print(user_id_to_upd)
-            credit_tracker.add_or_upd_user_credit(user_id_to_upd, credits=1000)
+            bank_tracker.add_or_upd_user_credit(user_id_to_upd, 1000)
         except:
-            return_text = "That's not gonna happen, you haven't been payin' into EI ... UI ... whatever you call it."
+            return_text = ("That's not gonna happen, "
+                "you haven't been payin' into EI ... "
+                "UI ... whatever you call it.")
     else:
-        return_text = ('/ray: This message.\n'
-                '/bank: return bank totals.\n'
-                '/bank wd 00: withdraw 00 credits from your bank.\n'
-                '/bank dep: immediately deposit all your daily credits into your bank.\n'
-                '/slots - /vlt - /vlts 00 - play the slots with 00 credits.\n'
-                'Happy 24(00) credits day!'
-                "Today's VLT symbols are:\n")
+        return_text = (
+            '/ray: This message.\n'
+            '/bank: return bank totals.\n'
+            '/slots - /vlt - /vlts 00 - play the slots with 00 credits.\n'
+            "Today's VLT symbols are:\n")
         for i in master_items:
             return_text += i
     return return_text
@@ -86,32 +97,22 @@ def slot_handler(message):
     user_name = str(message.from_user.first_name) + ' ' + str(message.from_user.last_name)
     print(type(user_name))
     print(user_name)
-    # check for the user in the credit_tracker, if found, set
+    # check for the user in the bank_tracker, if found, set
     # remaining credit, else add them and give them some smokes.
     try:
-        user_last_accessed = credit_tracker.query_user_map(user_id)[2]
+        user_last_accessed = bank_tracker.query_user_table(user_id)[2]
     except:
         user_last_accessed = ''
-    if user_last_accessed != today:
-        print('new day for {0}, banking/reseting...'.format(user_name))
-        try:
-            credit_info = credit_tracker.get_user_credit(user_id)
-            new_bank = int(credit_info[1] + credit_info[2])
-            credit_tracker.add_or_upd_user_credit(user_id, 5, new_bank)
-        except:
-            pass
-    credit_tracker.populate_user_map(user_id, user_name, today)
-
+    bank_tracker.populate_user_table(user_id, user_name, today)
     try:
-        current_user_credits = credit_tracker.get_user_credit(user_id)[1]
-        current_user_bank = credit_tracker.get_user_credit(user_id)[2]
-        if current_user_credits < 1:
-            return 'Sorry there, Rick, but I gotta cut ya off.\n Way she goes.'
+        current_user_bank = bank_tracker.get_user_bank(user_id)[1]
+        if current_user_bank < 1:
+            return ('Sorry there, Rick, but I gotta cut ya off.\n '
+                'Way she goes (Maybe Julian will lend you some chips?)')
     except:
-        print('user {0} not found in map, adding with 5 credits, and an empty bank'.format(user_id))
-        credit_tracker.add_or_upd_user_credit(user_id, 5, 0)
-        current_user_credits = 5
-        current_user_bank = 0
+        print('user {0} not found in DB, adding with 500 chips'.format(user_id))
+        bank_tracker.add_or_upd_user_credit(user_id, 500)
+        current_user_bank = 500
     
     # determine bet size based on int passed after /command.
     # if this is > total credits, bet 'em all.
@@ -122,8 +123,8 @@ def slot_handler(message):
             bet = 1
     except:
         bet = 1
-    if bet > current_user_credits:
-        bet = current_user_credits
+    if bet > current_user_bank: # If you bet the farm...
+        bet = current_user_bank # you bet the farm :D
     # Take 4 items out of the master_items list at random to play with.
     # This helps keep the graphics rotating and fresh without making 
     # the odds of winning nearly impossible.
@@ -146,10 +147,10 @@ def slot_handler(message):
             win_lines += 1
     total_score = bet * win_lines #extra-line multiplier
     if total_score == 0:
-        remaining_credits_now = current_user_credits - bet # ding this user for their total bet amount
+        updated_user_bank = current_user_bank - bet # ding this user for their total bet amount
     else:
-        remaining_credits_now = current_user_credits + total_score # credit
-    credit_tracker.add_or_upd_user_credit(user_id, remaining_credits_now, current_user_bank)
+        updated_user_bank = current_user_bank + total_score # credit
+    bank_tracker.add_or_upd_user_credit(user_id, updated_user_bank)
     return_text = (" {}    {}      {}\n\n"
                      "{}    {}      {}\n\n"
                      "{}    {}      {}\n").format(*[slot_items[i] for i in numpy.nditer(slot_array)])
@@ -157,13 +158,13 @@ def slot_handler(message):
         return_text += ("Your bet of {0} won on {1} line(s) for a total of {2}."
                      "You now have a total of {3} credits!").format(bet, win_lines,
                                                                     total_score,
-                                                                    remaining_credits_now)
+                                                                    updated_user_bank)
     else:
-        return_text += "Good job CYRUS, ya dick. you lost {0} credits.\n".format(bet)
-        if remaining_credits_now < 1:
-            return_text += "You're out of credits now, why don't you go study for your Grade 10."
+        return_text += "Good job CYRUS. you lost {0} credits.\n".format(bet)
+        if updated_user_bank < 1:
+            return_text += "You're out of credits now, why don't you go study for your Grade 10!?"
         else:
-            return_text += "Now you have {0} left. Smokes, let's go!".format(remaining_credits_now)
+            return_text += "Now you have {0} left. Smokes, let's go!".format(updated_user_bank)
     return return_text
 
 def deconstruct_array(a):
@@ -189,63 +190,17 @@ def deconstruct_array(a):
         line_list.append(i)
     return line_list
 
-def bank_handler(message):
-    actions = ['wd', 'dep']
-    try:
-        bank_action = message.text.split(' ')[1]
-    except:
-        bank_action = 'None'
-    if bank_action not in actions:
-        return_text = bank_statement()
-    elif bank_action == 'wd':
-        return_text = bank_withdraw(message)
-    elif bank_action == 'dep':
-        return_text = bank_deposit(message)
-    return return_text
-
-def bank_withdraw(message):
-    user_id = message.from_user.id
-    try:
-        user_current_stats = credit_tracker.get_user_credit(user_id)
-        user_current_bank = user_current_stats[2]
-        user_current_credit = user_current_stats[1]
-    except:
-        return 'Cant load your bank right now.'
-    try:
-        wd_amount = int(message.text.split(' ')[2])
-    except:
-        return 'Unknown amount for withdrawal.'
-    if user_current_bank >= wd_amount:
-        user_current_bank -= wd_amount
-        user_current_credit += wd_amount
-        credit_tracker.add_or_upd_user_credit(user_id,
-                                            user_current_credit,
-                                            user_current_bank)
-    return 'Transfer of {} credits complete.'.format(wd_amount)
-
-def bank_deposit(message):
-    user_id = message.from_user.id
-    user_name = str(message.from_user.first_name) + ' ' + str(message.from_user.last_name)
-    try:
-        credit_info = credit_tracker.get_user_credit(user_id)
-        new_bank = int(credit_info[1] + credit_info[2])
-        credit_tracker.add_or_upd_user_credit(user_id, 0, new_bank)
-    except:
-        pass
-    return_text = "Moved {0}'s {1} credits into the bank".format(user_name, credit_info[1])
-    return return_text
-
 def bank_statement():
-    sql = ("SELECT u.user_name, c.credits, c.bank "
-        "FROM users u, credit_tracker c "
-        "WHERE u.user_id == c.user_id ")
-    cur_result = credit_tracker.db_conn.execute(sql)
-    return_text = 'USER                CREDITS     BANK\n'
+    sql = ("SELECT u.user_name, b.balance "
+        "FROM users u, bank b "
+        "WHERE u.user_id == b.user_id ")
+    cur_result = bank_tracker.db_conn.execute(sql)
+    return_text = 'USER             BALANCE\n'
     for i in cur_result.fetchall():
-        return_text += "{}:    {}     {}\n".format(*i)
+        return_text += "{}:            {}\n".format(*i)
     return return_text
 
-class userCreditTracker(object):
+class bankTracker(object):
     def __init__(self, db_file):
         self.db_file = db_file
         self.db_conn = sqlite3.connect(self.db_file, check_same_thread=False)
@@ -256,52 +211,65 @@ class userCreditTracker(object):
 
     def _init_db(self):
         schema = self.db_conn.execute("SELECT name "
-                                    "FROM sqlite_master "
-                                    "Where type = 'table'")
+            "FROM sqlite_master "
+            "Where type = 'table'")
         if not schema.fetchall():
-            self.db_conn.execute("CREATE TABLE credit_tracker "
-                                "(user_id INT UNIQUE, "
-                                "credits INT, bank INT)")
+            self.db_conn.execute("CREATE TABLE bank "
+                "(user_id INT UNIQUE, "
+                "balance INT, "
+                "debt INT)")
             self.db_conn.execute("CREATE TABLE users "
-                                "(user_id INT UNIQUE, "
-                                "user_name TEXT, last_accessed TEXT)")
+                "(user_id INT UNIQUE, "
+                "user_name TEXT, "
+                "last_accessed TEXT, "
+                "last_borrowed TEXT, "
+                "borrow_count INT)")
             self.db_conn.commit()
     
-    def populate_user_map(self, user_id, user_name, last_accessed):
+    def populate_user_table(self, user_id, user_name, last_accessed, last_borrowed='', borrow_count=0):
         sql = ("INSERT or REPLACE "
-              "INTO users "
-              "VALUES({0}, '{1}', '{2}')".format(user_id, user_name, last_accessed))
+            "INTO users "
+            "VALUES({0}, '{1}', '{2}', '{3}', {4})".format(user_id, 
+                user_name,
+                last_accessed,
+                last_borrowed,
+                borrow_count))
         print(sql)
         self.db_conn.execute(sql)
     
-    def query_user_map(self, user_id):
+    def query_user_table(self, user_id):
         sql = "SELECT * FROM users WHERE user_id = {0}".format(user_id)
         cur_result = self.db_conn.execute(sql)
         return cur_result.fetchone()
 
-    def add_or_upd_user_credit(self, user_id, credits=0, bank=0):
-        sql = ("INSERT or REPLACE "
-                "INTO credit_tracker "
-                "VALUES({0}, {1}, {2})".format(user_id, credits, bank))
+    def add_or_upd_user_credit(self, user_id, transaction, debt=0):
+        try:
+            user_bank_details = get_user_bank(user_id)
+            current_bank = user_bank_details[1] # eventually factor debt into this, but for now ¯\_(ツ)_/¯
+            current_bank += transaction
+        except:
+            # Couldn't get the user bank info so assume it's non-existant
+            current_bank = transaction
+        sql = ("INSERT or REPLACE INTO bank "
+            "VALUES({0}, {1}, {2})".format(user_id, current_bank, debt))
         self.db_conn.execute(sql)
         self.db_conn.commit()
     
-    def get_user_credit(self, user_id):
-        cursor_result = self.db_conn.execute("SELECT * "
-                                            "FROM credit_tracker "
-                                            "WHERE user_id = {0}".format(user_id))
+    def get_user_bank(self, user_id):
+        cursor_result = self.db_conn.execute("SELECT * FROM bank "
+            "WHERE user_id = {0}".format(user_id))
         return cursor_result.fetchone()
 
     def resolve_user_id(self, user_string):
         sql = ("SELECT user_id FROM users "
-                "WHERE upper(user_name) like '%{0}%'").format(user_string.upper())
+            "WHERE upper(user_name) like '%{0}%'").format(user_string.upper())
         print(sql)
         cur_result = self.db_conn.execute(sql)
         return cur_result.fetchone()[0]
 
 if __name__ == '__main__':
     #init the global tracker
-    db_file = 'credit_tracker.sqlite3db'
-    credit_tracker = userCreditTracker(db_file)
+    db_file = 'bank_tracker.sqlite3db'
+    bank_tracker = bankTracker(db_file)
     #start the bot in polling mode
     bot.polling(none_stop=True, timeout=90)
