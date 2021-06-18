@@ -8,16 +8,7 @@ import time
 import numpy
 import telebot
 
-"""
-TO-DO:
-1) refactor duplicate actions (like moving credits into bank, which we do twice)
-2) create a better "message" object to pass around that has all the variables
-    we want/need already parsed instead of doing it in every func.
-3) fix race condition if someone transfers before issuing their first pull
-    of the day, they lose the transferred creds, and get 5 in their place.
-"""
-
-'''Grab your bot token from a textfile (.token). This is required to run.'''
+# Grab your bot token from a textfile (.token). This is required to run.
 try:
     with open('.token', 'r') as token_file:
         TOKEN = token_file.readline().strip()
@@ -25,7 +16,7 @@ except Exception as e:
     sys.exit(e)
 
 #init the bot
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
 master_items = [u'\U0001F352',
     u'\U0001F4A9',
@@ -47,47 +38,39 @@ are not in the approved command list.
     'vlts', 
     'vlt', 
     'bank', 
-    'ray', 
-    'loan', 
-    'lend', 
-    'borrow'])
+    'ray'])
 
 def send_message(message):
     split_message = message.text.split(' ')
     print(message)
     if message.text[:5] == '/bank':
-        reply = bank_statement()
-    elif message.text[:2] == '/r' and split_message[0][-2:] == 'ay':
-        reply = help_handler(message)
+        reply = bank_handler(message)
+    elif message.text[:4] == '/ray':
+        reply = help_handler()
     else:
         reply = slot_handler(message)
     print(reply)
     bot.reply_to(message, reply)
+    
+def help_handler():
+    return_text = ("<pre>"
+        "/ray \n"
+        "------ \n"
+        "This message.\n\n"
 
-def help_handler(message):
-    split_message = message.text.split(" ")
-    # For now, we'll let people borrow indiscriminately, but we should implement a limit,
-    # an auto-payback system, etc.
-    if len(split_message) > 2 and split_message[1] == 'lend':
-        try:
-            user_id_to_upd = bank_tracker.resolve_user_id(split_message[2])
-            return_text = (
-                "OK, Ill lend {0} 1000 credits, "
-                "Bubbs, but only 'cause you're askin'.".format(user_id_to_upd))            
-            print(user_id_to_upd)
-            bank_tracker.add_or_upd_user_credit(user_id_to_upd, 1000)
-        except:
-            return_text = ("That's not gonna happen, "
-                "you haven't been payin' into EI ... "
-                "UI ... whatever you call it.")
-    else:
-        return_text = (
-            '/ray: This message.\n'
-            '/bank: return bank totals.\n'
-            '/slots - /vlt - /vlts 00 - play the slots with 00 credits.\n'
-            "Today's VLT symbols are:\n")
-        for i in master_items:
-            return_text += i
+        "/bank \n"
+        "----- \n"
+        "return bank totals.\n\n"
+
+        "/slots /vlt /vlts N\n"
+        "------------------- \n"
+        "play the slots with N credits.\n\n"
+
+        "Today's VLT symbols\n"
+        "--------------------\n")
+    for i in master_items:
+        return_text += i
+    return_text += "</pre>"
     return return_text
 
 def slot_handler(message):
@@ -151,9 +134,12 @@ def slot_handler(message):
     else:
         updated_user_bank = current_user_bank + total_score # credit
     bank_tracker.add_or_upd_user_credit(user_id, updated_user_bank)
-    return_text = (" {}    {}      {}\n\n"
-                     "{}    {}      {}\n\n"
-                     "{}    {}      {}\n").format(*[slot_items[i] for i in numpy.nditer(slot_array)])
+    return_text = (
+        "<pre>"
+        "{}    {}    {}\n\n"
+        "{}    {}    {}\n\n"
+        "{}    {}    {}\n"
+        "</pre>").format(*[slot_items[i] for i in numpy.nditer(slot_array)])
     if win_lines > 0:
         return_text += ("Your bet of {0} won on {1} line(s) for a total of {2}."
                      "You now have a total of {3} credits!").format(bet, win_lines,
@@ -165,6 +151,32 @@ def slot_handler(message):
             return_text += "You're out of credits now, why don't you go study for your Grade 10!?"
         else:
             return_text += "Now you have {0} left. Smokes, let's go!".format(updated_user_bank)
+    return return_text
+
+def bank_handler(message):
+    split_message = message.text.split(" ")
+    # For now, we'll let people borrow indiscriminately, but we should implement a limit,
+    # an auto-payback system, etc.
+    if len(split_message) > 2 and split_message[1] == 'lend':
+        try:
+            user_id_to_upd = bank_tracker.resolve_user_id(split_message[2])
+            return_text = (
+                "OK, Ill lend {0} 1000 credits, "
+                "Bubbs, but only 'cause you're askin'.".format(user_id_to_upd))            
+            print(user_id_to_upd)
+            bank_tracker.add_or_upd_user_credit(user_id_to_upd, 1000)
+        except:
+            return_text = ("That's not gonna happen, "
+                "you haven't been payin' into EI ... "
+                "UI ... whatever you call it.")
+    else:
+        user_bank = bank_tracker.get_user_bank(message.from_user.id)
+        return_text = "{} your balance is {}.\n".format(*user_bank)
+        leader_tup = bank_tracker.get_leader()
+        if leader_tup[0] == user_bank[0]:
+            return_text += "You are the current bank leader."
+        else:
+            return_text += "Leader is {} with {} chips.\n".format(*leader_tup)
     return return_text
 
 def deconstruct_array(a):
@@ -189,16 +201,6 @@ def deconstruct_array(a):
     for i in numpy.rot90(a):
         line_list.append(i)
     return line_list
-
-def bank_statement():
-    sql = ("SELECT u.user_name, b.balance "
-        "FROM users u, bank b "
-        "WHERE u.user_id == b.user_id ")
-    cur_result = bank_tracker.db_conn.execute(sql)
-    return_text = 'USER             BALANCE\n'
-    for i in cur_result.fetchall():
-        return_text += "{}:            {}\n".format(*i)
-    return return_text
 
 class bankTracker(object):
     def __init__(self, db_file):
@@ -256,9 +258,20 @@ class bankTracker(object):
         self.db_conn.commit()
     
     def get_user_bank(self, user_id):
-        cursor_result = self.db_conn.execute("SELECT * FROM bank "
-            "WHERE user_id = {0}".format(user_id))
+        sql = ("SELECT u.user_name, b.balance "
+            "FROM users u, bank b "
+            "WHERE u.user_id == b.user_id "
+            "AND u.user_id = {0}").format(user_id)
+        cursor_result = self.db_conn.execute(sql)
         return cursor_result.fetchone()
+
+    def get_leader(self):
+        sql = ("SELECT u.user_name, b.balance "
+            "FROM users u, bank b "
+            "WHERE b.balance == (SELECT max(balance) from bank) "
+            "AND b.user_id == u.user_id")
+        cur_result = self.db_conn.execute(sql)
+        return cur_result.fetchone()
 
     def resolve_user_id(self, user_string):
         sql = ("SELECT user_id FROM users "
